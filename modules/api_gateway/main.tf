@@ -151,6 +151,16 @@ resource "aws_apigatewayv2_stage" "default" {
   name        = "$default"
   auto_deploy = true
 
+  # Plan section 35.11 -- aggregate, platform-wide throttle, coarser
+  # and separate from TenantPolicy.rpm_limit (bedrock-gateway-app's own
+  # per-tenant limit, enforced deep in the request pipeline). This one
+  # protects the whole platform from a burst across every tenant
+  # combined, before a request even reaches the VPC Link.
+  default_route_settings {
+    throttling_rate_limit  = var.throttling_rate_limit
+    throttling_burst_limit = var.throttling_burst_limit
+  }
+
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.access.arn
     # A plain string template, not jsonencode() -- $context.* fields are
@@ -189,4 +199,113 @@ resource "aws_apigatewayv2_stage" "default" {
   }
 
   depends_on = [aws_cloudwatch_log_resource_policy.access_log_delivery]
+}
+
+# --- WAF (plan section 35.11, P1 production hardening) --------------------
+#
+# Real recurring cost -- see var.enable_waf's own comment. Regional
+# scope (this is an API Gateway stage, not CloudFront) -- confirmed
+# via the AWS provider's own resource support (aws_wafv2_web_acl_
+# association accepts an API Gateway v2 stage ARN as resource_arn).
+#
+# Three rule groups, priority order matters (lower evaluated first):
+#   1. AWS Managed Core Rule Set -- generic web exploit protection
+#      (SQLi, XSS, path traversal, etc.) -- most requests never
+#      trigger the more specific rules below, so this goes first.
+#   2. AWS Managed Known Bad Inputs -- exploit patterns tied to known
+#      CVEs, log4j-style payloads.
+#   3. A rate-based rule, per-IP over a 5-minute window -- the
+#      per-source backstop var.waf_rate_limit_per_5min describes; the
+#      stage's own throttling_rate_limit above is aggregate across
+#      every source, this one catches a single bad actor specifically.
+resource "aws_wafv2_web_acl" "this" {
+  count = var.enable_waf ? 1 : 0
+  name  = "${var.name_prefix}-waf"
+  scope = "REGIONAL"
+
+  default_action {
+    allow {}
+  }
+
+  rule {
+    name     = "aws-managed-core-rule-set"
+    priority = 1
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesCommonRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.name_prefix}-core-rule-set"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "aws-managed-known-bad-inputs"
+    priority = 2
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.name_prefix}-known-bad-inputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "per-ip-rate-limit"
+    priority = 3
+
+    action {
+      block {}
+    }
+
+    statement {
+      rate_based_statement {
+        limit              = var.waf_rate_limit_per_5min
+        aggregate_key_type = "IP"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.name_prefix}-per-ip-rate-limit"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  visibility_config {
+    cloudwatch_metrics_enabled = true
+    metric_name                = "${var.name_prefix}-waf"
+    sampled_requests_enabled   = true
+  }
+
+  tags = {
+    Environment = var.environment
+  }
+}
+
+resource "aws_wafv2_web_acl_association" "this" {
+  count        = var.enable_waf ? 1 : 0
+  resource_arn = aws_apigatewayv2_stage.default.arn
+  web_acl_arn  = aws_wafv2_web_acl.this[0].arn
 }

@@ -46,3 +46,37 @@ variable "log_group_name" {
   type        = string
   default     = ""
 }
+
+# Plan section 35's P1 hardening -- edge throttling + WAF (35.11).
+# Stage-level throttle is a second, coarser layer above
+# TenantPolicy.rpm_limit (bedrock-gateway-app's own per-tenant limit,
+# enforced deep in the request pipeline) -- this one protects the
+# whole platform from an aggregate burst across every tenant at once,
+# before a request even reaches the VPC Link.
+variable "throttling_rate_limit" {
+  description = "Steady-state requests/second across the whole API (all tenants combined)."
+  type        = number
+  default     = 200
+}
+
+variable "throttling_burst_limit" {
+  type    = number
+  default = 400
+}
+
+# WAF has real recurring cost (~$5/mo base + ~$1/mo per rule +
+# $0.60/million requests) -- true of every environment this gets
+# applied to, same category of decision as the NAT gateways (plan
+# section 35.10). default true since the user explicitly asked for
+# this as a named P1 item; can be turned off per-environment by
+# setting false if that decision changes.
+variable "enable_waf" {
+  type    = bool
+  default = true
+}
+
+variable "waf_rate_limit_per_5min" {
+  description = "Requests from a single IP in a rolling 5-minute window before WAF blocks it -- a coarser, IP-based backstop distinct from the stage-level throttle above (which is aggregate, not per-source) and from TenantPolicy.rpm_limit (which is per-authenticated-tenant, not per-IP)."
+  type        = number
+  default     = 2000
+}
