@@ -203,109 +203,24 @@ resource "aws_apigatewayv2_stage" "default" {
 
 # --- WAF (plan section 35.11, P1 production hardening) --------------------
 #
-# Real recurring cost -- see var.enable_waf's own comment. Regional
-# scope (this is an API Gateway stage, not CloudFront) -- confirmed
-# via the AWS provider's own resource support (aws_wafv2_web_acl_
-# association accepts an API Gateway v2 stage ARN as resource_arn).
+# NOT built, on purpose -- this was attempted (aws_wafv2_web_acl +
+# aws_wafv2_web_acl_association against aws_apigatewayv2_stage.default's
+# ARN) and failed live: AWS WAFv2's AssociateWebACL only supports
+# Amazon API Gateway REST APIs, ALB, AppSync, Cognito user pools, App
+# Runner, Verified Access, Amplify, and Bedrock AgentCore Gateway --
+# NOT API Gateway HTTP APIs (aws_apigatewayv2_api, what this module
+# builds). Confirmed against AWS's own AssociateWebACL API reference,
+# not guessed at; the Terraform provider accepts any string ARN
+# without validating resource type, so this only surfaces as a
+# WAFInvalidParameterException at apply time, not at plan/validate.
 #
-# Three rule groups, priority order matters (lower evaluated first):
-#   1. AWS Managed Core Rule Set -- generic web exploit protection
-#      (SQLi, XSS, path traversal, etc.) -- most requests never
-#      trigger the more specific rules below, so this goes first.
-#   2. AWS Managed Known Bad Inputs -- exploit patterns tied to known
-#      CVEs, log4j-style payloads.
-#   3. A rate-based rule, per-IP over a 5-minute window -- the
-#      per-source backstop var.waf_rate_limit_per_5min describes; the
-#      stage's own throttling_rate_limit above is aggregate across
-#      every source, this one catches a single bad actor specifically.
-resource "aws_wafv2_web_acl" "this" {
-  count = var.enable_waf ? 1 : 0
-  name  = "${var.name_prefix}-waf"
-  scope = "REGIONAL"
-
-  default_action {
-    allow {}
-  }
-
-  rule {
-    name     = "aws-managed-core-rule-set"
-    priority = 1
-
-    override_action {
-      none {}
-    }
-
-    statement {
-      managed_rule_group_statement {
-        name        = "AWSManagedRulesCommonRuleSet"
-        vendor_name = "AWS"
-      }
-    }
-
-    visibility_config {
-      cloudwatch_metrics_enabled = true
-      metric_name                = "${var.name_prefix}-core-rule-set"
-      sampled_requests_enabled   = true
-    }
-  }
-
-  rule {
-    name     = "aws-managed-known-bad-inputs"
-    priority = 2
-
-    override_action {
-      none {}
-    }
-
-    statement {
-      managed_rule_group_statement {
-        name        = "AWSManagedRulesKnownBadInputsRuleSet"
-        vendor_name = "AWS"
-      }
-    }
-
-    visibility_config {
-      cloudwatch_metrics_enabled = true
-      metric_name                = "${var.name_prefix}-known-bad-inputs"
-      sampled_requests_enabled   = true
-    }
-  }
-
-  rule {
-    name     = "per-ip-rate-limit"
-    priority = 3
-
-    action {
-      block {}
-    }
-
-    statement {
-      rate_based_statement {
-        limit              = var.waf_rate_limit_per_5min
-        aggregate_key_type = "IP"
-      }
-    }
-
-    visibility_config {
-      cloudwatch_metrics_enabled = true
-      metric_name                = "${var.name_prefix}-per-ip-rate-limit"
-      sampled_requests_enabled   = true
-    }
-  }
-
-  visibility_config {
-    cloudwatch_metrics_enabled = true
-    metric_name                = "${var.name_prefix}-waf"
-    sampled_requests_enabled   = true
-  }
-
-  tags = {
-    Environment = var.environment
-  }
-}
-
-resource "aws_wafv2_web_acl_association" "this" {
-  count        = var.enable_waf ? 1 : 0
-  resource_arn = aws_apigatewayv2_stage.default.arn
-  web_acl_arn  = aws_wafv2_web_acl.this[0].arn
-}
+# The only real way to put AWS WAF in front of this HTTP API is a
+# CloudFront distribution (CLOUDFRONT-scope WAF, global not REGIONAL)
+# with this API Gateway stage as its origin -- which needs its own
+# TLS chain and is naturally the same piece of work as the custom API
+# domain (also not built, blocked on the user providing a real
+# domain/Route53 zone). Deferred together, not attempted separately.
+#
+# The stage-level throttling above (default_route_settings) is real,
+# live, aggregate edge protection independent of this -- that part of
+# 35.11 stands on its own and needed no WAF.
