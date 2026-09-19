@@ -73,6 +73,29 @@ curl -s -X POST https://as1n3q8d33.execute-api.us-east-1.amazonaws.com/v1/chat \
   -d '{"messages":[{"role":"user","content":"Say hi in one word."}]}'
 ```
 
+## Edge protection: throttling is real, WAF is not (and can't be, as-is)
+
+The stage has real, configurable throttling (`throttling_rate_limit`/
+`throttling_burst_limit` on `aws_apigatewayv2_stage.default`'s
+`default_route_settings`) -- an aggregate cap across every tenant
+combined, distinct from `TenantPolicy.rpm_limit` (per-tenant, enforced
+deep in the app) and from any per-source-IP protection.
+
+AWS WAF was attempted and reverted (see `modules/api_gateway/main.tf`'s
+own comment where the resources used to be): `aws_wafv2_web_acl` +
+`aws_wafv2_web_acl_association` against this stage's ARN failed at
+apply time with `WAFInvalidParameterException`. Confirmed against AWS's
+own `AssociateWebACL` API reference, not guessed at -- AWS WAFv2 only
+supports associating with API Gateway **REST APIs**, ALB, AppSync,
+Cognito user pools, App Runner, Verified Access, Amplify, and Bedrock
+AgentCore Gateway. This is an HTTP API (`aws_apigatewayv2_api`), which
+isn't on that list. The only real way to put AWS WAF in front of this
+API is a CloudFront distribution (CLOUDFRONT-scope WAF) with this
+stage as its origin -- the same TLS/domain work as a custom API
+domain, itself not built yet (needs a real domain/Route53 zone). Both
+are deferred together, not attempted separately -- see `plan.md`
+section 35 in the platform root.
+
 ## Deliberately loose coupling to bedrock-gateway-infra
 
 This repo never reads `bedrock-gateway-infra`'s Terraform state
