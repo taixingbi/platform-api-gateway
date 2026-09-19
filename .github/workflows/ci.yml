@@ -60,6 +60,24 @@ jobs:
         working-directory: environments/dev
         run: terraform plan -input=false -lock=false
 
+  # Plan section 35.9 (P2 production hardening) -- same reasoning as
+  # bedrock-gateway-infra's own copy of this job: NOT in apply-dev's
+  # `needs:`, findings land in the Security tab.
+  tfsec:
+    name: IaC scan (tfsec)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/tfsec-sarif-action@v0.1.4
+        with:
+          sarif_file: tfsec.sarif
+      - uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: tfsec.sarif
+
   apply-dev:
     name: apply (dev)
     needs: fmt-validate
