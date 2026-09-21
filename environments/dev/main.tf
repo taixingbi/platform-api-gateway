@@ -1,13 +1,13 @@
-# Deliberately loosely coupled to bedrock-gateway-infra: this repo
-# never references bedrock-gateway-infra's Terraform state directly
+# Deliberately loosely coupled to bedrock-runtime-gateway-infra: this repo
+# never references bedrock-runtime-gateway-infra's Terraform state directly
 # (no terraform_remote_state, no hardcoded resource IDs) -- it looks
 # up the existing private ALB by name via a plain AWS data source, the
-# same way modules/portal_service (in bedrock-gateway-infra) looks up
+# same way modules/portal_service (in bedrock-runtime-gateway-infra) looks up
 # the AWS-managed CloudFront prefix list by name. Either repo can be
 # re-applied independently without the other's state file.
 #
 # This VPC Link's security group is deliberately named differently
-# from the one bedrock-gateway-infra used to own directly
+# from the one bedrock-runtime-gateway-infra used to own directly
 # (gateway-dev-vpc-link) -- AWS enforces unique security group names
 # per VPC, so reusing that exact name here would collide with the one
 # still being destroyed on the other side of this split's cutover

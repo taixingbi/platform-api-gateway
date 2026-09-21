@@ -1,6 +1,6 @@
 name: Promote api-gateway to prod
 
-# Same shape as bedrock-gateway-infra's promote-prod.yml: an explicit
+# Same shape as bedrock-runtime-gateway-infra's promote-prod.yml: an explicit
 # action against a specific already-dev-validated commit, never an
 # automatic side effect of pushing to main.
 

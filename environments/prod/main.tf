@@ -1,6 +1,6 @@
 # Mirrors environments/dev -- see that file's own comments for why
 # this repo looks up the ALB by name (data source) instead of
-# referencing bedrock-gateway-infra's Terraform state directly.
+# referencing bedrock-runtime-gateway-infra's Terraform state directly.
 
 terraform {
   required_version = ">= 1.5"

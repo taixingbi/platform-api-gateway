@@ -49,7 +49,7 @@ variable "log_group_name" {
 
 # Plan section 35's P1 hardening -- edge throttling + WAF (35.11).
 # Stage-level throttle is a second, coarser layer above
-# TenantPolicy.rpm_limit (bedrock-gateway-app's own per-tenant limit,
+# TenantPolicy.rpm_limit (bedrock-runtime-gateway-app's own per-tenant limit,
 # enforced deep in the request pipeline) -- this one protects the
 # whole platform from an aggregate burst across every tenant at once,
 # before a request even reaches the VPC Link.

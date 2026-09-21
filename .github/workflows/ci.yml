@@ -61,7 +61,7 @@ jobs:
         run: terraform plan -input=false -lock=false
 
   # Plan section 35.9 (P2 production hardening) -- same reasoning as
-  # bedrock-gateway-infra's own copy of this job: NOT in apply-dev's
+  # bedrock-runtime-gateway-infra's own copy of this job: NOT in apply-dev's
   # `needs:`, findings land in the Security tab.
   tfsec:
     name: IaC scan (tfsec)

@@ -1,9 +1,9 @@
-# platform-api-gateway
+# platform-edge-gateway
 
 The Bedrock Gateway platform's front door, split out of
-`bedrock-gateway-infra`'s `modules/api_gateway` into its own repo (see
+`bedrock-runtime-gateway-infra`'s `modules/api_gateway` into its own repo (see
 `plan.md` Section 25's repository structure). One HTTP API, one VPC
-Link to the private ALB `bedrock-gateway-infra` manages, and two
+Link to the private ALB `bedrock-runtime-gateway-infra` manages, and two
 routes reaching the same backend under different auth:
 
 ```text
@@ -23,7 +23,7 @@ API Gateway gets a new one).
 API Gateway verifies the signature itself, so the caller needs real
 AWS credentials for a principal mapped in `platform-authz-service`
 (`policies/iam_tenants.yaml`, or a provisioned application — see
-`bedrock-gateway-app`'s onboarding workflow). Plain `curl` can't sign
+`bedrock-runtime-gateway-app`'s onboarding workflow). Plain `curl` can't sign
 a SigV4 request on its own; the two easiest ways to do it are:
 
 **`awscurl`** (`pip install awscurl`) — closest thing to a literal curl call:
@@ -63,7 +63,7 @@ is already valid by the time API Gateway forwards the request.
 Plain `curl` works here; no request signing needed, just a valid
 OIDC-issued token (Cognito, via the portal's login flow) or, for local
 testing, a dev-keypair-signed token
-(`bedrock-gateway-app`'s `scripts/generate_dev_token.py`, only usable
+(`bedrock-runtime-gateway-app`'s `scripts/generate_dev_token.py`, only usable
 where `OIDC_JWKS_URL` is unset):
 
 ```bash
@@ -96,19 +96,19 @@ domain, itself not built yet (needs a real domain/Route53 zone). Both
 are deferred together, not attempted separately -- see `plan.md`
 section 35 in the platform root.
 
-## Deliberately loose coupling to bedrock-gateway-infra
+## Deliberately loose coupling to bedrock-runtime-gateway-infra
 
-This repo never reads `bedrock-gateway-infra`'s Terraform state
+This repo never reads `bedrock-runtime-gateway-infra`'s Terraform state
 (no `terraform_remote_state`, no hardcoded resource IDs). It looks up
 the existing private ALB by name via a plain `data "aws_lb"` source
 and creates its own VPC Link + security group
 (`gateway-{env}-api-gw-vpc-link` — deliberately not reusing
-`bedrock-gateway-infra`'s old `gateway-{env}-vpc-link` name, since AWS
+`bedrock-runtime-gateway-infra`'s old `gateway-{env}-vpc-link` name, since AWS
 enforces unique security group names per VPC and the old one still
 existed during this split's cutover). Either repo can be re-applied
 independently without needing the other's state file.
 
-For `bedrock-gateway-infra`'s ALB security group to actually accept
+For `bedrock-runtime-gateway-infra`'s ALB security group to actually accept
 traffic from this VPC Link, its `modules/ecs_service` ingress rule
 looks this security group up by name too (`data "aws_security_group"`,
 not a cross-state reference) — see that repo's own commit history for
@@ -116,7 +116,7 @@ the cutover.
 
 ## Why "destroy and recreate", not a state migration
 
-The original `modules/api_gateway` resources in `bedrock-gateway-infra`
+The original `modules/api_gateway` resources in `bedrock-runtime-gateway-infra`
 were destroyed and this repo's resources created fresh, rather than
 migrating the existing Terraform state across repos
 (`terraform state mv`/`import`). That means a new
@@ -127,7 +127,7 @@ state migration, at the cost of that one-time URL change.
 
 ## The cutover's real gotcha: cross-repo SG destroy ordering
 
-`bedrock-gateway-infra`'s `modules/ecs_service`'s ALB security group
+`bedrock-runtime-gateway-infra`'s `modules/ecs_service`'s ALB security group
 ingress rule switched from `aws_security_group.vpc_link.id` (an
 in-config resource) to `data.aws_security_group.api_gateway_vpc_link`
 (a by-name lookup, once the old resource was deleted from that repo's
@@ -151,7 +151,7 @@ being removed from config in the same change.
 
 ## CI/CD
 
-Same dev-auto/prod-manual-promotion shape as `bedrock-gateway-infra`:
+Same dev-auto/prod-manual-promotion shape as `bedrock-runtime-gateway-infra`:
 push to `main` auto-applies `environments/dev`; `environments/prod` is
 a separate `workflow_dispatch` (`promote-prod.yml`) pinned to a commit
 SHA that already applied cleanly to dev, gated by a required-reviewer

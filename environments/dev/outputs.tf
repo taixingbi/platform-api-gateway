@@ -13,7 +13,7 @@ output "access_log_group_name" {
 }
 
 output "vpc_link_security_group_id" {
-  description = "For bedrock-gateway-infra's ecs_service ALB security group to allow as ingress (looked up by name there, not referenced directly -- see this file's own module comment)."
+  description = "For bedrock-runtime-gateway-infra's ecs_service ALB security group to allow as ingress (looked up by name there, not referenced directly -- see this file's own module comment)."
   value       = aws_security_group.vpc_link.id
 }
 

@@ -152,7 +152,7 @@ resource "aws_apigatewayv2_stage" "default" {
   auto_deploy = true
 
   # Plan section 35.11 -- aggregate, platform-wide throttle, coarser
-  # and separate from TenantPolicy.rpm_limit (bedrock-gateway-app's own
+  # and separate from TenantPolicy.rpm_limit (bedrock-runtime-gateway-app's own
   # per-tenant limit, enforced deep in the request pipeline). This one
   # protects the whole platform from a burst across every tenant
   # combined, before a request even reaches the VPC Link.
@@ -170,7 +170,7 @@ resource "aws_apigatewayv2_stage" "default" {
     # instead of preserving the grouping below. A literal string sidesteps
     # that entirely.
     # service/environment are fixed per-deployment identity fields, same
-    # convention as bedrock-gateway-app's/platform-authz-service's own
+    # convention as bedrock-runtime-gateway-app's/platform-authz-service's own
     # structured JSON logs (telemetry/logging.py) -- let a request be
     # traced across every log source without needing to already know
     # which log group it came from.
