@@ -38,6 +38,19 @@ locals {
   # with "/" gives the backend the same path it would see called
   # directly ("/v1/chat").
   path_rewrite = { "overwrite:path" = "/$${request.path.proxy}" }
+
+  # Shared by both NONE-auth routes ("open" and "admin"): overwrite,
+  # not remove, both identity headers to a fixed sentinel that can
+  # never collide with a real IAM principal ARN or account ID -- see
+  # the "open" integration's own comment for the full live-caught
+  # story (a real API Gateway limitation: empty-string
+  # request_parameters values are silently dropped, not persisted at
+  # all, so "remove:" never actually worked here).
+  identity_header_reset = {
+    "overwrite:header.${var.principal_arn_header}" = "not-authenticated-via-api-gateway-iam-route"
+    "overwrite:header.${var.account_id_header}"    = "not-authenticated-via-api-gateway-iam-route"
+    "overwrite:header.x-apigw-request-id"          = "$${context.requestId}"
+  }
 }
 
 resource "aws_apigatewayv2_integration" "iam" {
@@ -108,11 +121,7 @@ resource "aws_apigatewayv2_integration" "open" {
   # impersonation of a REAL principal is exactly as impossible as
   # actually removing the header would have been, just via a different
   # mechanism forced by this platform limitation.
-  request_parameters = merge(local.path_rewrite, {
-    "overwrite:header.${var.principal_arn_header}" = "not-authenticated-via-api-gateway-iam-route"
-    "overwrite:header.${var.account_id_header}"    = "not-authenticated-via-api-gateway-iam-route"
-    "overwrite:header.x-apigw-request-id"          = "$${context.requestId}"
-  })
+  request_parameters = merge(local.path_rewrite, local.identity_header_reset)
 }
 
 resource "aws_apigatewayv2_route" "iam" {
@@ -156,16 +165,15 @@ resource "aws_apigatewayv2_integration" "admin" {
   # from {proxy+}, since the catch-all route's fixed prefix is just
   # "/"), this route's fixed prefix ("/v1/admin/") is NOT included in
   # $request.path.proxy -- calling /v1/admin/tenants gives proxy ==
-  # "tenants", not "v1/admin/tenants". The backend's own routes are
-  # registered at the full /v1/admin/* path (see admin_routes.py/
-  # onboarding_routes.py), so the prefix has to be re-prepended here,
-  # not just re-derived.
-  request_parameters = {
-    "overwrite:path"                               = "/v1/admin/$${request.path.proxy}"
-    "overwrite:header.${var.principal_arn_header}" = "not-authenticated-via-api-gateway-iam-route"
-    "overwrite:header.${var.account_id_header}"    = "not-authenticated-via-api-gateway-iam-route"
-    "overwrite:header.x-apigw-request-id"          = "$${context.requestId}"
-  }
+  # "tenants", not "v1/admin/tenants". platform-control-plane's own
+  # backend registers its routes at the full /v1/admin/* path, so the
+  # prefix has to be re-prepended here, not just re-derived -- hence
+  # this integration's own path overwrite instead of local.path_rewrite,
+  # merged with the same local.identity_header_reset "open" uses.
+  request_parameters = merge(
+    { "overwrite:path" = "/v1/admin/$${request.path.proxy}" },
+    local.identity_header_reset,
+  )
 }
 
 resource "aws_apigatewayv2_route" "admin" {

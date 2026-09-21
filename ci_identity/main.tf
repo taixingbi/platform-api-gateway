@@ -68,19 +68,6 @@ data "aws_iam_policy_document" "api_gateway_plan" {
     actions   = ["s3:GetObject", "s3:ListBucket"]
     resources = ["arn:aws:s3:::*tfstate*", "arn:aws:s3:::*tfstate*/*"]
   }
-  # WAF-on-HTTP-API was tried and reverted (AWS WAFv2 doesn't support
-  # API Gateway HTTP APIs -- see modules/api_gateway/main.tf's own
-  # comment) but the plan role never got a wafv2 grant at all (only
-  # apply-dev/apply-prod did, via WafBroad below), so a plan can't even
-  # refresh the one Web ACL that got created before the association
-  # failed -- 403 on wafv2:GetWebACL, blocking the plan step that would
-  # otherwise destroy it cleanly. Read-only, matching this document's
-  # own ReadOnly-statement style.
-  statement {
-    sid       = "WafReadOnly"
-    actions   = ["wafv2:Get*", "wafv2:List*"]
-    resources = ["*"]
-  }
   # Terraform-ownership migration follow-up: this repo's Terraform
   # never touched IAM at all before ci_identity moved in (no
   # execution/task roles of its own, just VPC Link SG + API Gateway
@@ -125,14 +112,6 @@ data "aws_iam_policy_document" "api_gateway_apply" {
     # -lock=false, so it never touches the lock file at all.
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:ListBucket"]
     resources = ["arn:aws:s3:::*tfstate*", "arn:aws:s3:::*tfstate*/*"]
-  }
-  # The WAF Web ACL + its association with the API Gateway stage. Web
-  # ACL ids don't exist until creation, same "*" reasoning as every
-  # other broad grant here.
-  statement {
-    sid       = "WafBroad"
-    actions   = ["wafv2:*"]
-    resources = ["*"]
   }
   # Terraform-ownership migration follow-up: this repo's Terraform
   # never managed any IAM role before ci_identity moved in -- this

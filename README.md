@@ -7,8 +7,11 @@ Link to the private ALB `bedrock-runtime-gateway-infra` manages, and two
 routes reaching the same backend under different auth:
 
 ```text
-ANY /iam/{proxy+}  AWS_IAM   -- SigV4-signed calls
-ANY /{proxy+}      NONE      -- Bearer JWT calls, verified by the app itself
+ANY /iam/{proxy+}         AWS_IAM   -- SigV4-signed calls
+ANY /{proxy+}             NONE      -- Bearer JWT calls, verified by the app itself
+ANY /v1/admin/{proxy+}    NONE      -- admin/onboarding traffic, routed to platform-control-plane's
+                                       own backend instead of falling through to /{proxy+} above
+                                       (a fixed path always wins over {proxy+} in route resolution)
 ```
 
 ## Example usage
@@ -149,10 +152,45 @@ the same fix: don't count on Terraform to sequence a cross-repo
 security-group swap correctly in one apply when the old side of it is
 being removed from config in the same change.
 
+## `/v1/admin/{proxy+}` -- the "direct cutover" route (2026-09-21)
+
+A fourth, more-specific route added alongside the two original ones:
+admin/onboarding traffic (tenant/application management, policy
+propose/approve/reject/rollback, onboarding requests) now goes to
+`platform-control-plane`'s own backend ALB (`var.admin_alb_listener_arn`,
+nullable -- environments without that backend live yet, prod today,
+just pass `null` and this route/integration don't get created at all).
+Same NONE-auth + sentinel-header-overwrite security control as the
+"open" route (see `modules/api_gateway/main.tf`'s own comments for the
+full live-caught story on why overwrite-to-sentinel, not remove).
+Adding this route never touched the existing `open`/`iam` routes or
+integrations -- a fixed path always wins over `{proxy+}` in API
+Gateway v2's route resolution, so this was purely additive.
+
+## Infra & CI
+
+This repo owns two independent Terraform roots, each with its own
+state and its own `fmt-validate`/`plan`/`apply-dev` CI jobs:
+
+- `environments/{dev,prod}/` -- the API Gateway itself, described
+  below.
+- `ci_identity/` -- this repo's own GitHub Actions IAM roles
+  (`gha-api-gateway-plan`, `gha-api-gateway-apply-{dev,prod}`). Added
+  2026-09-21 as part of a platform-wide Terraform-ownership migration:
+  these roles used to be defined centrally in `platform-foundation`,
+  moved here via `terraform import` (never deleted/recreated, so the
+  ARNs and this repo's own GitHub Environment variables never
+  changed). Unlike every other migrated repo, this one's Terraform had
+  never touched IAM at all before -- no execution/task roles of its
+  own, just the VPC Link security group and API Gateway resources --
+  so `gha-api-gateway-apply-dev`'s own policy needed brand-new `iam:*`
+  permissions added from scratch, scoped to manage only
+  `gha-api-gateway-*`-named roles (including itself).
+
 ## CI/CD
 
 Same dev-auto/prod-manual-promotion shape as `bedrock-runtime-gateway-infra`:
-push to `main` auto-applies `environments/dev`; `environments/prod` is
-a separate `workflow_dispatch` (`promote-prod.yml`) pinned to a commit
-SHA that already applied cleanly to dev, gated by a required-reviewer
-GitHub Environment.
+push to `main` auto-applies `environments/dev` and `ci_identity`;
+`environments/prod` is a separate `workflow_dispatch`
+(`promote-prod.yml`) pinned to a commit SHA that already applied
+cleanly to dev, gated by a required-reviewer GitHub Environment.
