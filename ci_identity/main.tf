@@ -24,6 +24,15 @@ provider "aws" {
   region = var.aws_region
 }
 
+# Terraform-ownership migration follow-up: needed now for
+# ManageApiGatewayRoles' resource ARN (this repo's Terraform never
+# touched IAM at all before ci_identity moved in).
+data "aws_caller_identity" "current" {}
+
+locals {
+  account_id = data.aws_caller_identity.current.account_id
+}
+
 # This repo's own Terraform plan/apply-dev/apply-prod roles -- it's
 # Terraform doing plan+apply, not a Docker build+deploy repo like
 # app/portal/authz. Scoped to exactly what modules/api_gateway (this
@@ -72,6 +81,16 @@ data "aws_iam_policy_document" "api_gateway_plan" {
     actions   = ["wafv2:Get*", "wafv2:List*"]
     resources = ["*"]
   }
+  # Terraform-ownership migration follow-up: this repo's Terraform
+  # never touched IAM at all before ci_identity moved in (no
+  # execution/task roles of its own, just VPC Link SG + API Gateway
+  # resources) -- needed now to refresh ci_identity's own aws_iam_role
+  # resources and read the account-wide OIDC provider via data source.
+  statement {
+    sid       = "IamReadOnly"
+    actions   = ["iam:Get*", "iam:List*"]
+    resources = ["*"]
+  }
 }
 
 data "aws_iam_policy_document" "api_gateway_apply" {
@@ -113,6 +132,25 @@ data "aws_iam_policy_document" "api_gateway_apply" {
   statement {
     sid       = "WafBroad"
     actions   = ["wafv2:*"]
+    resources = ["*"]
+  }
+  # Terraform-ownership migration follow-up: this repo's Terraform
+  # never managed any IAM role before ci_identity moved in -- this
+  # repo's own CI roles (gha-api-gateway-*, managed by this same
+  # ci_identity root, including itself) are the first.
+  statement {
+    sid = "ManageApiGatewayRoles"
+    actions = [
+      "iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:UpdateRole",
+      "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:GetRolePolicy",
+      "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:ListAttachedRolePolicies",
+      "iam:ListRolePolicies", "iam:TagRole", "iam:UntagRole", "iam:PassRole",
+    ]
+    resources = ["arn:aws:iam::${local.account_id}:role/gha-api-gateway-*"]
+  }
+  statement {
+    sid       = "OidcProviderReadOnly"
+    actions   = ["iam:ListOpenIDConnectProviders", "iam:GetOpenIDConnectProvider"]
     resources = ["*"]
   }
 }
