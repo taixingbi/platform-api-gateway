@@ -13,6 +13,12 @@ variable "alb_listener_arn" {
   type        = string
 }
 
+variable "admin_alb_listener_arn" {
+  description = "Phase 4 (2026-09-21, \"direct cutover\"): the control-plane backend's own ALB listener (platform-control-plane/infra's module.backend_service.alb_listener_arn) -- ANY /v1/admin/{proxy+} routes here instead of the catch-all's alb_listener_arn, more specific so it takes priority without touching any other route. Nullable/optional so environments without that backend live yet (prod today) don't need it."
+  type        = string
+  default     = null
+}
+
 variable "vpc_link_subnet_ids" {
   description = "Subnets for the VPC Link's ENIs. Can be the same public subnets the ALB/ECS tasks use -- the VPC Link itself needs no internet route, only a path to the ALB."
   type        = list(string)

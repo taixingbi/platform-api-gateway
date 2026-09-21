@@ -113,6 +113,49 @@ resource "aws_apigatewayv2_route" "open" {
   target             = "integrations/${aws_apigatewayv2_integration.open.id}"
 }
 
+# Phase 4 (2026-09-21, "direct cutover"): admin/onboarding traffic now
+# goes to platform-control-plane's own backend instead of falling
+# through to the "open" route/gateway-api above -- a specific path
+# always wins over {proxy+} in API Gateway v2's route resolution, so
+# this doesn't touch the open route or anything it still serves
+# (chat/jobs/everything else). Same NONE auth + header-stripping
+# security control as "open" (this is still a JWT-authenticated route,
+# a client could still try to inject the identity headers here).
+resource "aws_apigatewayv2_integration" "admin" {
+  count = var.admin_alb_listener_arn != null ? 1 : 0
+
+  api_id                 = aws_apigatewayv2_api.this.id
+  integration_type       = "HTTP_PROXY"
+  integration_uri        = var.admin_alb_listener_arn
+  integration_method     = "ANY"
+  connection_type        = "VPC_LINK"
+  connection_id          = aws_apigatewayv2_vpc_link.this.id
+  payload_format_version = "1.0"
+
+  # Unlike local.path_rewrite (which re-derives the FULL original path
+  # from {proxy+}, since the catch-all route's fixed prefix is just
+  # "/"), this route's fixed prefix ("/v1/admin/") is NOT included in
+  # $request.path.proxy -- calling /v1/admin/tenants gives proxy ==
+  # "tenants", not "v1/admin/tenants". The backend's own routes are
+  # registered at the full /v1/admin/* path (see admin_routes.py/
+  # onboarding_routes.py), so the prefix has to be re-prepended here,
+  # not just re-derived.
+  request_parameters = {
+    "overwrite:path"                            = "/v1/admin/$${request.path.proxy}"
+    "remove:header.${var.principal_arn_header}" = ""
+    "remove:header.${var.account_id_header}"    = ""
+    "overwrite:header.x-apigw-request-id"       = "$${context.requestId}"
+  }
+}
+
+resource "aws_apigatewayv2_route" "admin" {
+  count = var.admin_alb_listener_arn != null ? 1 : 0
+
+  api_id             = aws_apigatewayv2_api.this.id
+  route_key          = "ANY /v1/admin/{proxy+}"
+  authorization_type = "NONE"
+  target             = "integrations/${aws_apigatewayv2_integration.admin[0].id}"
+}
 
 # Access logging -- covers every request that reaches this stage,
 # including ones the AWS_IAM authorizer rejects before the backend
