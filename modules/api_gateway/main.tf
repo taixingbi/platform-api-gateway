@@ -82,20 +82,36 @@ resource "aws_apigatewayv2_integration" "open" {
   connection_id          = aws_apigatewayv2_vpc_link.this.id
   payload_format_version = "1.0"
 
-  # Empty string is API Gateway's documented "remove this header"
-  # value -- not "don't set", but "strip it if the client sent it".
-  # This is the control that makes the IAM route's header-trust safe:
-  # without it, a client could set x-platform-principal-arn directly on
-  # this open route and the app would trust it.
+  # SECURITY FIX (2026-09-21, live-caught): empty string is API
+  # Gateway's DOCUMENTED "remove this header" value for a
+  # `remove:header.*` mapping -- but confirmed live, via both
+  # Terraform apply and a direct `aws apigatewayv2 update-integration`
+  # call, that this specific API silently DROPS any request_parameters
+  # entry whose value is an empty string, for every action type
+  # (remove: AND overwrite:), not just this one. The write appears to
+  # succeed (no error, "Apply complete") but the mapping is simply
+  # never persisted -- confirmed exploitable: a real, unauthenticated
+  # curl request with x-platform-principal-arn set was accepted and
+  # dispatched into the AWS_IAM auth path (pipeline.py's authenticate()
+  # takes that path whenever the header is present at all, regardless
+  # of which route delivered it).
+  #
+  # Fix: overwrite (not remove) to a fixed sentinel that can never
+  # collide with a real IAM principal ARN or account ID, using the
+  # SAME overwrite: action already proven to persist correctly
+  # (x-apigw-request-id below has worked the whole time -- only empty
+  # string values are silently dropped, not the overwrite: action
+  # itself). pipeline.py's authenticate() still takes the IAM path for
+  # this sentinel (the header is still truthy), but
+  # iam_tenant_resolver.resolve() then fails with a clean "no tenant
+  # mapping" 403 for it, same as any other unmapped principal --
+  # impersonation of a REAL principal is exactly as impossible as
+  # actually removing the header would have been, just via a different
+  # mechanism forced by this platform limitation.
   request_parameters = merge(local.path_rewrite, {
-    "remove:header.${var.principal_arn_header}" = ""
-    "remove:header.${var.account_id_header}"    = ""
-    # Overwrite (not remove-if-client-sent, like the two above) -- this
-    # isn't a trust/auth field, just a log correlation convenience, but
-    # still shouldn't let a client inject an arbitrary value that looks
-    # like it came from API Gateway. See the iam integration's identical
-    # mapping for the full comment.
-    "overwrite:header.x-apigw-request-id" = "$${context.requestId}"
+    "overwrite:header.${var.principal_arn_header}" = "not-authenticated-via-api-gateway-iam-route"
+    "overwrite:header.${var.account_id_header}"    = "not-authenticated-via-api-gateway-iam-route"
+    "overwrite:header.x-apigw-request-id"          = "$${context.requestId}"
   })
 }
 
@@ -118,9 +134,13 @@ resource "aws_apigatewayv2_route" "open" {
 # through to the "open" route/gateway-api above -- a specific path
 # always wins over {proxy+} in API Gateway v2's route resolution, so
 # this doesn't touch the open route or anything it still serves
-# (chat/jobs/everything else). Same NONE auth + header-stripping
+# (chat/jobs/everything else). Same NONE auth + header-overwrite
 # security control as "open" (this is still a JWT-authenticated route,
-# a client could still try to inject the identity headers here).
+# a client could still try to inject the identity headers here) --
+# see the open integration's own comment for why this overwrites to a
+# sentinel instead of removing the header (a real, live-confirmed API
+# Gateway limitation: empty-string request_parameters values are
+# silently dropped, not persisted at all).
 resource "aws_apigatewayv2_integration" "admin" {
   count = var.admin_alb_listener_arn != null ? 1 : 0
 
@@ -141,10 +161,10 @@ resource "aws_apigatewayv2_integration" "admin" {
   # onboarding_routes.py), so the prefix has to be re-prepended here,
   # not just re-derived.
   request_parameters = {
-    "overwrite:path"                            = "/v1/admin/$${request.path.proxy}"
-    "remove:header.${var.principal_arn_header}" = ""
-    "remove:header.${var.account_id_header}"    = ""
-    "overwrite:header.x-apigw-request-id"       = "$${context.requestId}"
+    "overwrite:path"                               = "/v1/admin/$${request.path.proxy}"
+    "overwrite:header.${var.principal_arn_header}" = "not-authenticated-via-api-gateway-iam-route"
+    "overwrite:header.${var.account_id_header}"    = "not-authenticated-via-api-gateway-iam-route"
+    "overwrite:header.x-apigw-request-id"          = "$${context.requestId}"
   }
 }
 
